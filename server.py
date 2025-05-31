@@ -5,10 +5,10 @@ from dotenv import load_dotenv
 import os
 import polars as pl
 from huggingface_hub import login
-
-login("***REMOVED***")
-# Cargar variables de entorno
 load_dotenv("credencialesPraw.env")
+login(os.getenv("HUGGINGFACE_TOKEN"))
+# Cargar variables de entorno
+
 
 # Inicializar modelo
 emotion_model_path = "j-hartmann/emotion-english-distilroberta-base"  # Reemplazo por uno público
