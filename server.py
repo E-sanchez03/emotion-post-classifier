@@ -42,7 +42,7 @@ def annotate_comments(comment_list, classifier=emotion_classifier):
 def get_results(url):
     submission = reddit.submission(url=url)
 
-    submission.comments.replace_more(limit=0)
+    submission.comments.replace_more(limit=10)
     comentarios = submission.comments.list()
 
     comments_dict = annotate_comments(comentarios)
@@ -102,9 +102,6 @@ app.layout = html.Div(
 @server.route('/')
 def home():
     return render_template('template.html')  # Asegúrate de que template.html existe
-
-
-
 
 
 @app.callback(
