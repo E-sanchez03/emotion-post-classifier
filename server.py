@@ -1,24 +1,18 @@
-from flask import Flask, request, render_template, jsonify, session, redirect, url_for
-from transformers import pipeline
+from flask import Flask, request, render_template, session, redirect, url_for
 import praw
 from dotenv import load_dotenv
 import os
 import polars as pl
-from huggingface_hub import login
+import pandas as pd
 import dash
 from dash import Dash, dcc, html, Input, Output, callback
 import plotly.express as px
+import requests
 
 # Cargar variables de entorno
 load_dotenv("credencialesPraw.env")
-# Login a HuggingFace
-login(os.getenv("HUGGINGFACE_TOKEN"))
 
-# Inicializar modelo
-emotion_model_path = "j-hartmann/emotion-english-distilroberta-base"  # Reemplazo por uno público
-emotion_classifier = pipeline(
-    "text-classification", model=emotion_model_path, return_all_scores=True, padding=True, truncation=True, device=0
-)
+MODEL_SERVICE_URL = os.getenv("MODEL_SERVICE_URL", "http://localhost:5001/classify")
 
 # Inicializar Reddit API
 reddit = praw.Reddit(
@@ -28,14 +22,14 @@ reddit = praw.Reddit(
 )
 
 # Función para clasificar los comentarios
-def annotate_comments(comment_list, classifier=emotion_classifier):
+def annotate_comments(comment_list):
     texts = [comment.body for comment in comment_list if hasattr(comment, "body")]
-    results = classifier(texts)
+    response = requests.post(MODEL_SERVICE_URL, json={"texts": texts})
+    results = response.json().get("emotions", [])
     comments_dict = {}
     for comment, result in zip(comment_list, results):
         if hasattr(comment, "id"):
-            top = max(result, key=lambda x: x['score'])
-            comments_dict[comment.id] = top['label']
+            comments_dict[comment.id] = result
     return comments_dict
 
 # Función para obtener las emociones
@@ -47,7 +41,7 @@ def get_results(url):
 
     comments_dict = annotate_comments(comentarios)
     df = pl.DataFrame({'Comentario': list(comments_dict.keys()), 'Emoción': list(comments_dict.values())})
-    emociones = df.group_by('Emoción').count()
+    emociones = df.group_by('Emoción').agg(pl.count().alias('count'))
     return emociones
 
 
@@ -121,11 +115,12 @@ def update_graph(pathname):
             # Crear el gráfico de tarta. px.pie puede tomar una lista de diccionarios.
             # Los diccionarios deben ser como: [{'Emoción': 'joy', 'count': 10}, {'Emoción': 'sad', 'count': 5}]
             fig = px.pie(
-                emociones_data_list, 
-                names='Emoción', 
-                values='count', 
-                title='Distribución de Emociones'
-            )
+                    emociones_data_list, 
+                    names='Emoción',  # Columna para las etiquetas de las porciones
+                    values='count',   # Columna para los valores (tamaño) de las porciones
+                    title='Distribución de Emociones en los Comentarios',
+                    hole=0.3 # Opcional: para un gráfico de donut
+                )
             return fig, "" # Figura y ningún mensaje de estado
         elif emociones_data_list is not None and len(emociones_data_list) == 0:
             return {}, "No se encontraron comentarios o emociones para analizar."
@@ -147,3 +142,5 @@ def procesar_url():
     # Redirigir a la página del dashboard de Dash
     return redirect(url_for('/dashboard/'))
 
+if __name__ == '__main__':
+    server.run(host='0.0.0.0', port=int(os.getenv("PORT", 8050)), debug=True)

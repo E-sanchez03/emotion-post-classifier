@@ -1,0 +1,46 @@
+services:
+  model_api:
+    build:
+      context: .
+      dockerfile: model.Dockerfile
+    container_name: model-api-service
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - HUGGINGFACE_TOKEN=${HUGGINGFACE_TOKEN}
+    volumes:
+      - ./model_api.py:/app/model_api.py
+      - huggingface_cache:/root/.cache/huggingface 
+    networks:
+      - app-network
+
+  web_app:
+    build:
+      context: .
+      dockerfile: webserver.Dockerfile 
+    container_name: web-server-service 
+    restart: unless-stopped
+    ports:
+      - "8050:8050"
+    depends_on:
+      - model_api
+    environment:
+      - MODEL_SERVICE_URL=http://model_api:5001/classify
+      - FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
+      - REDDIT_CLIENT_ID=${REDDIT_CLIENT_ID}
+      - REDDIT_CLIENT_SECRET=${REDDIT_CLIENT_SECRET}
+      - REDDIT_USER_AGENT=${REDDIT_USER_AGENT}
+    
+    volumes: 
+      - ./server.py:/app/server.py 
+      - ./templates:/app/templates
+    networks: 
+      - app-network
+
+
+networks:
+  app-network:
+    driver: bridge
+volumes:
+   huggingface_cache: {}

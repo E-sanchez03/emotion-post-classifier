@@ -1,0 +1,9 @@
+flask
+dash
+plotly
+praw
+polars
+python-dotenv
+requests
+numpy
+pandas

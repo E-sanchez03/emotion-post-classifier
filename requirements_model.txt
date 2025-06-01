@@ -1,0 +1,4 @@
+flask
+transformers[torch]
+python-dotenv
+huggingface_hub
