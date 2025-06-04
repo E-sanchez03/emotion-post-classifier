@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Página de Inicio</title>
-  <style>
+  <title>Análisis de Emociones Reddit</title> <style>
     body {
       margin: 0;
       padding: 0;
@@ -13,91 +12,120 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      height: 100vh;
+      min-height: 100vh; /* Asegura que el cuerpo ocupe al menos toda la altura */
+      padding: 20px; /* Espacio por si el contenido es muy grande */
+      box-sizing: border-box;
     }
 
     .search-container {
       text-align: center;
       background-color: #fff;
-      padding: 40px;
+      padding: 30px 40px; /* Ajustado padding */
       border-radius: 15px;
-      box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); /* Sombra un poco más pronunciada */
       position: relative; 
+      max-width: 500px; /* Limitar ancho máximo */
+      width: 100%;
     }
 
     .search-container h1 {
-      margin-bottom: 20px;
+      margin-top: 0; /* Quitar margen superior del h1 si es el primer elemento */
+      margin-bottom: 25px;
       color: #333; 
+      font-size: 24px; /* Tamaño de fuente ajustado */
+    }
+    
+    .form-group { /* Agrupador para label y input */
+        margin-bottom: 20px;
+    }
+
+    .form-group label { /* Estilo para el label */
+        display: block;
+        margin-bottom: 8px;
+        color: #555;
+        font-size: 14px;
+        text-align: left;
     }
 
     .search-container input[type="url"] {
-      padding: 10px;
-      width: 300px;
+      padding: 12px 15px; /* Padding aumentado */
+      width: 100%; /* Hacerlo full width dentro de su contenedor */
       border: 1px solid #ccc;
       border-radius: 8px;
       font-size: 16px;
-      margin-right: 10px;
-      box-sizing: border-box; 
+      box-sizing: border-box; /* Importante para que padding no aumente el tamaño total */
     }
 
     .search-container button {
-      padding: 10px 20px;
+      padding: 12px 25px; /* Padding aumentado */
       background-color: #007bff;
       color: white;
       border: none;
       border-radius: 8px;
       font-size: 16px;
       cursor: pointer;
-      transition: background-color 0.3s ease; 
+      transition: background-color 0.3s ease, transform 0.1s ease; /* Añadida transición para transform */
+      width: 100%; /* Hacerlo full width */
     }
 
     .search-container button:hover {
       background-color: #0056b3;
     }
+    .search-container button:active { /* Feedback visual al hacer clic */
+        transform: scale(0.98);
+    }
+    .search-container button:disabled { /* Estilo para botón deshabilitado */
+        background-color: #cccccc;
+        cursor: not-allowed;
+    }
+
 
     /* Estilos para la animación de carga */
     .loader-container {
-        display: none; /* Oculto por defecto */
-        position: fixed; 
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(255, 255, 255, 0.85); 
-        z-index: 9999; 
-        /* Propiedades Flexbox para centrar el contenido cuando sea visible */
-        justify-content: center;
-        align-items: center;
-        flex-direction: column; 
+      /* display: none;  Quitamos esta, la de abajo la sobreescribe y es más específica */
+      position: fixed; 
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(255, 255, 255, 0.9); /* Un poco más opaco */
+      z-index: 9999; 
+      display: none; /* Esta es la que controla la visibilidad inicial */
+      justify-content: center;
+      align-items: center;
+      flex-direction: column; 
     }
 
     .spinner {
-        border: 8px solid #f3f3f3; 
-        border-top: 8px solid #007bff; 
-        border-radius: 50%;
-        width: 60px;
-        height: 60px;
-        animation: spin 1.5s linear infinite;
-        margin-bottom: 20px; 
+      border: 8px solid #f3f3f3; 
+      border-top: 8px solid #007bff; 
+      border-radius: 50%;
+      width: 60px;
+      height: 60px;
+      animation: spin 1.2s linear infinite; /* Velocidad ligeramente ajustada */
+      margin-bottom: 20px; 
     }
 
     @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
     }
 
     .loader-container p {
-        font-size: 18px;
-        color: #333; 
+      font-size: 18px;
+      color: #333; 
     }
   </style>
 </head>
 <body>
   <div class="search-container">
-    <h1>Buscar URL</h1>
-    <form id="urlForm" action="/procesar-url" method="POST">
-      <input type="url" name="url" placeholder="Introduce una URL" required />
-      <button type="submit" id="submitButton">Enviar</button>
+    <h1>Análisis de Emociones de Comentarios de Reddit</h1>
+    <form id="urlForm" action="/" method="POST">
+      <div class="form-group">
+        <label for="urlInput">URL de la publicación de Reddit:</label>
+        <input type="url" id="urlInput" name="url" placeholder="Ej: https://www.reddit.com/r/..." required />
+      </div>
+      <button type="submit" id="submitButton">Analizar Emociones</button>
     </form>
   </div>
 
@@ -107,32 +135,43 @@
   </div>
 
   <script>
-    const form = document.getElementById('urlForm');
-    const submitButton = document.getElementById('submitButton');
-    const loader = document.getElementById('loader');
+    document.addEventListener('DOMContentLoaded', () => {
+      const form = document.getElementById('urlForm');
+      const submitButton = document.getElementById('submitButton');
+      const loader = document.getElementById('loader');
+      const urlInput = document.getElementById('urlInput'); // Obtener el input
 
-    if (form) { 
-        form.addEventListener('submit', show_loader);
-    }
-    function show_loader() {
-            if (loader) {
-                loader.style.display = 'flex'; // Cambiamos a flex para mostrar y centrar
-            }
-            if (submitButton) {
-                submitButton.disabled = true;
-                submitButton.innerText = 'Procesando...';
-            }
+      form.addEventListener('submit', (event) => {
+        // Validación simple de URL de Reddit (opcional, el backend también debería validar)
+        const urlValue = urlInput.value.trim();
+        if (!urlValue.startsWith('https://www.reddit.com/') && !urlValue.startsWith('http://www.reddit.com/')) {
+            alert('Por favor, introduce una URL válida de Reddit (debe empezar con https://www.reddit.com/).');
+            event.preventDefault(); // Detener el envío del formulario
+            return;
         }
-    window.addEventListener('pageshow', function(event) {
+
+        if (loader) {
+          loader.style.display = 'flex';
+        }
+        if (submitButton) {
+          submitButton.disabled = true;
+          submitButton.innerText = 'Procesando...';
+        }
+      });
+
+      // Maneja el regreso del usuario al formulario si navega hacia atrás
+      window.addEventListener('pageshow', function(event) {
+        // event.persisted es true si la página se carga desde el bfcache
         if (event.persisted) {
-            if (loader) {
-                loader.style.display = 'none';
-            }
-            if (submitButton) {
-                submitButton.disabled = false;
-                submitButton.innerText = 'Enviar';
-            }
+          if (loader) loader.style.display = 'none';
+          if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.innerText = 'Analizar Emociones';
+          }
+          // Limpiar el campo de URL si se desea al volver atrás
+          // if (urlInput) urlInput.value = '';
         }
+      });
     });
   </script>
 </body>

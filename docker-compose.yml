@@ -35,6 +35,7 @@ services:
     volumes: 
       - ./server.py:/app/server.py 
       - ./templates:/app/templates
+      - /tmp:/tmp
     networks: 
       - app-network
 

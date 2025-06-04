@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultado del Análisis de Emociones</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding:0; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height:100vh;}
+        .container { background-color: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 90%; max-width: 800px; margin: 20px;}
+        h1 { color: #333; text-align: center; margin-bottom: 30px;}
+        .error { color: red; border: 1px solid red; padding: 15px; margin-top: 20px; background-color: #ffebeb; border-radius: 4px; text-align: center;}
+        .chart-container-wrapper {
+            position: relative;
+            margin: auto;
+            max-width: 700px;
+        }
+        a.back-link { 
+            display: block;
+            width: fit-content;
+            margin: 30px auto 0 auto;
+            padding: 12px 20px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+            text-align: center;
+        }
+        a.back-link:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Resultados del Análisis de Emociones</h1>
+
+        {% if error %}
+            <div class="error">
+                <strong>Error:</strong> {{ error }}
+            </div>
+        {% endif %}
+
+        {% if chart_data_json %}
+            <div class="chart-container-wrapper">
+                <canvas id="emotionChart"></canvas>
+            </div>
+
+            <script type="text/javascript">
+                try {
+                    // CORRECCIÓN AQUÍ: No usar JSON.parse()
+                    // {{ chart_data_json | safe }} ya inyecta un literal de objeto JS válido.
+                    const chartDataFromServer = {{ chart_data_json | safe }};
+
+                    const ctx = document.getElementById('emotionChart').getContext('2d');
+
+                    const emotionChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: chartDataFromServer,
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Cantidad de Comentarios'
+                                    }
+                                },
+                                x: {
+                                    title: {
+                                        display: true,
+                                        text: 'Emoción'
+                                    }
+                                }
+                            },
+                            plugins: {
+                                legend: {
+                                    display: true,
+                                    position: 'top',
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'Distribución de Emociones en los Comentarios'
+                                }
+                            }
+                        }
+                    });
+                } catch (e) {
+                    console.error("Error al dibujar el gráfico con Chart.js: ", e); // Mensaje de error ligeramente cambiado
+                    const chartContainer = document.querySelector('.chart-container-wrapper');
+                    if(chartContainer) {
+                        chartContainer.innerHTML = "<p class='error'>Error al mostrar el gráfico. Revisa la consola para más detalles.</p>";
+                    }
+                }
+            </script>
+        {% elif not error %}
+            <p style="text-align:center; margin-top:20px;">No se generó ningún gráfico. Puede que no hubiera datos para mostrar.</p>
+        {% endif %}
+        
+        <a href="/" class="back-link">Volver a la página de inicio</a>
+    </div>
+</body>
+</html>
