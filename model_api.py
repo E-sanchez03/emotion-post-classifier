@@ -3,6 +3,7 @@ from transformers import pipeline
 import os
 from dotenv import load_dotenv
 from huggingface_hub import login
+import logging
 
 # Cargamos las variables de entorno
 load_dotenv("credencialesPraw.env")
@@ -17,7 +18,8 @@ classifier_path = "j-hartmann/emotion-english-distilroberta-base"
 pipe = pipeline(
     "text-classification", model=classifier_path, return_all_scores=True, padding=True, truncation=True, device=0
 )
-
+api.logger.setLevel(logging.DEBUG) 
+api.logger.info("Flask en modo debug, el logger debería funcionar en consola.")
 
 @api.route("/classify", methods=['POST'])
 def classify_emotions():
