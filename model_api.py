@@ -3,11 +3,7 @@ from transformers import pipeline
 import os
 from dotenv import load_dotenv
 from huggingface_hub import login
-<<<<<<< HEAD
 import torch # Para la detección de GPU
-=======
-import logging
->>>>>>> 4fdb5eb37ffe81572edba59d5d364117beaf79fd
 
 # Cargar variables de entorno desde archivo .env
 load_dotenv("credencialesPraw.env")
@@ -25,7 +21,6 @@ if huggingface_token:
 # Crear la aplicación Flask
 api = Flask(__name__)
 
-<<<<<<< HEAD
 # Inicializar pipeline de clasificación emocional
 classifier_path = "j-hartmann/emotion-english-distilroberta-base" # Modelo en inglés
 pipe = None # Inicializar como None
@@ -53,14 +48,6 @@ except Exception as e:
     print("La API de modelo podría no funcionar correctamente.")
     # En un entorno de producción, podrías querer que la aplicación falle aquí
     # o tenga un estado de 'no saludable'.
-=======
-classifier_path = "j-hartmann/emotion-english-distilroberta-base"
-pipe = pipeline(
-    "text-classification", model=classifier_path, return_all_scores=True, padding=True, truncation=True, device=0
-)
-api.logger.setLevel(logging.DEBUG) 
-api.logger.info("Flask en modo debug, el logger debería funcionar en consola.")
->>>>>>> 4fdb5eb37ffe81572edba59d5d364117beaf79fd
 
 @api.route("/classify", methods=['POST'])
 def classify_emotions():
