@@ -164,10 +164,11 @@ def home():
         chart_data_json = json.dumps(chart_data)
 
         return render_template("resultado.html", chart_data_json=chart_data_json)
-            
-    return render_template("template.html")
+    else:     
+        app.logger.info('Holas')  
+        return render_template("template.html")
 
 if __name__ == "__main__":
     if not reddit:
         print("ADVERTENCIA: El servidor se está ejecutando pero no se pudo conectar a Reddit al inicio.")
-    app.run(debug=True, port=5000)
+    app.run(debug=True, host='0.0.0.0', port=8050)
