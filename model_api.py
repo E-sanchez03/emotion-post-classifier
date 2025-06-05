@@ -1,97 +1,155 @@
 from flask import Flask, request, jsonify
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 import os
-from dotenv import load_dotenv
-from huggingface_hub import login
-import torch # Para la detección de GPU
+import logging
 
-# Cargar variables de entorno desde archivo .env
-load_dotenv("credencialesPraw.env")
+# Configurar logging básico
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Login en Hugging Face (necesario para cargar modelos privados o usar tokens)
-huggingface_token = os.getenv("HUGGINGFACE_TOKEN")
-if huggingface_token:
+app = Flask(__name__)
+
+# Diccionario para cachear los pipelines de Hugging Face cargados
+# Esto evita tener que recargar el modelo en cada solicitud.
+loaded_pipelines = {}
+
+# Definir los modelos disponibles y sus tareas (todos son text-classification para emociones)
+# Podrías cargar esto desde una configuración si lo prefieres.
+AVAILABLE_MODELS = {
+    "j-hartmann/emotion-english-distilroberta-base": "text-classification",
+    "michellejieli/emotion_text_classifier": "text-classification", # En HF Hub está como text-classification
+    "Panda0116/emotion-classification-model": "text-classification",
+    "hamzawaheed/emotion-classification-model": "text-classification",
+    "uboza10300/emotion-classification-model": "text-classification",
+    "Zoopa/emotion-classification-model": "text-classification",
+    "bhadresh-savani/distilbert-base-uncased-emotion": "text-classification",
+    "SamLowe/roberta-base-go_emotions": "text-classification",
+    "joeddav/distilbert-base-uncased-go-emotions-student": "text-classification"
+    # Puedes añadir más modelos aquí
+}
+
+def get_pipeline(model_name):
+    """
+    Carga y devuelve un pipeline de Hugging Face.
+    Utiliza una caché para evitar recargar modelos.
+    """
+    if model_name not in AVAILABLE_MODELS:
+        raise ValueError(f"Modelo '{model_name}' no está en la lista de modelos disponibles.")
+
+    if model_name in loaded_pipelines:
+        logger.info(f"Usando pipeline cacheado para el modelo: {model_name}")
+        return loaded_pipelines[model_name]
+
     try:
-        login(huggingface_token)
-        print("Login en Hugging Face exitoso.")
+        logger.info(f"Cargando modelo: {model_name}...")
+        # Especificar la tarea puede no ser siempre necesario si el modelo la define bien,
+        # pero es más explícito. Para modelos de emoción, 'text-classification' es lo usual.
+        # Algunos modelos pueden requerir la carga explícita de tokenizer y model
+        # si la inferencia de pipeline simple no funciona como se espera,
+        # pero para la mayoría de los modelos de clasificación de texto, esto es suficiente.
+        
+        # Asegurarse de que el modelo puede manejar la tarea como "text-classification"
+        # Si un modelo específico devuelve múltiples etiquetas o necesita un manejo especial,
+        # se podría personalizar aquí.
+        task = AVAILABLE_MODELS[model_name]
+        
+        # Para asegurar que obtenemos la etiqueta y el score, incluso si es solo la top_k=1
+        # Esto es lo que la app cliente parece esperar: una lista de diccionarios.
+        classifier = pipeline(task, model=model_name, tokenizer=model_name, top_k=1)
+        
+        loaded_pipelines[model_name] = classifier
+        logger.info(f"Modelo '{model_name}' cargado y cacheado exitosamente.")
+        return classifier
     except Exception as e:
-        print(f"Error durante el login en Hugging Face: {e}")
-        # Podrías decidir si continuar o salir si el login es crítico
+        logger.error(f"Error al cargar el modelo '{model_name}': {e}")
+        # Podrías querer eliminarlo de la caché si la carga falló parcialmente.
+        if model_name in loaded_pipelines:
+            del loaded_pipelines[model_name]
+        raise RuntimeError(f"No se pudo cargar el modelo '{model_name}'. Error: {str(e)}")
 
-# Crear la aplicación Flask
-api = Flask(__name__)
 
-# Inicializar pipeline de clasificación emocional
-classifier_path = "j-hartmann/emotion-english-distilroberta-base" # Modelo en inglés
-pipe = None # Inicializar como None
-
-try:
-    # Determinar dispositivo (GPU si está disponible, si no CPU)
-    if torch.cuda.is_available():
-        device_num = 0 # Usar la primera GPU
-        print(f"GPU detectada. Usando dispositivo: cuda:{device_num}")
-    else:
-        device_num = -1 # Usar CPU
-        print("GPU no detectada. Usando CPU.")
-
-    pipe = pipeline(
-        "text-classification",
-        model=classifier_path,
-        return_all_scores=True, # Necesario para obtener todas las puntuaciones y luego el máximo
-        padding=True,
-        truncation=True,
-        device=device_num 
-    )
-    print(f"Pipeline de clasificación cargado exitosamente en {'GPU' if device_num != -1 else 'CPU'}.")
-except Exception as e:
-    print(f"Error CRÍTICO al cargar el modelo de Transformers o inicializar el pipeline: {e}")
-    print("La API de modelo podría no funcionar correctamente.")
-    # En un entorno de producción, podrías querer que la aplicación falle aquí
-    # o tenga un estado de 'no saludable'.
-
-@api.route("/classify", methods=['POST'])
-def classify_emotions():
-    if pipe is None:
-        return jsonify({"error": "El modelo de clasificación no está disponible debido a un error de inicialización."}), 503 # Service Unavailable
+@app.route('/classify', methods=['POST'])
+def classify_texts():
+    if not request.is_json:
+        logger.warning("Solicitud recibida no es JSON.")
+        return jsonify({"error": "Solicitud debe ser JSON"}), 400
 
     data = request.get_json()
-    if not data:
-        return jsonify({"error": "No se recibió payload JSON."}), 400
-        
-    texts = data.get("texts")
+    texts = data.get('texts')
+    model_name = data.get('model_name')
 
-    if not texts or not isinstance(texts, list):
-        return jsonify({"error": "No se proporcionó una lista de textos válida en la clave 'texts'."}), 400
-    
-    # Filtrar strings vacíos o None en la lista de textos, ya que el pipeline puede fallar con ellos
-    valid_texts = [text for text in texts if isinstance(text, str) and text.strip()]
-    if not valid_texts:
-        return jsonify({"error": "La lista de textos está vacía o no contiene strings válidos."}), 400
+    if not texts:
+        logger.warning("No se proporcionaron textos en la solicitud.")
+        return jsonify({"error": "No se proporcionaron 'texts' en el cuerpo de la solicitud."}), 400
+    if not isinstance(texts, list):
+        logger.warning("'texts' no es una lista.")
+        return jsonify({"error": "'texts' debe ser una lista de strings."}), 400
+    if not model_name:
+        logger.warning("No se proporcionó 'model_name' en la solicitud.")
+        return jsonify({"error": "No se proporcionó 'model_name' en el cuerpo de la solicitud."}), 400
+
+    logger.info(f"Solicitud de clasificación recibida para el modelo: {model_name} con {len(texts)} textos.")
 
     try:
-        results = pipe(valid_texts) # Solo procesar textos válidos
+        classifier = get_pipeline(model_name)
+    except ValueError as e: # Modelo no disponible
+        logger.error(f"Error: {str(e)}")
+        return jsonify({"error": str(e)}), 404
+    except RuntimeError as e: # Error al cargar el modelo
+        logger.error(f"Error interno del servidor: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+    except Exception as e: # Otros errores inesperados al obtener el pipeline
+        logger.error(f"Error inesperado al obtener el pipeline para '{model_name}': {e}")
+        return jsonify({"error": f"Error inesperado al configurar el modelo: {str(e)}"}), 500
+
+    try:
+        # El pipeline devuelve una lista de listas de diccionarios si top_k > 1 o top_k=None.
+        # Si top_k=1 (como lo configuré), devuelve una lista de listas, donde cada sublista tiene un solo diccionario.
+        # Ejemplo: [[{'label': 'joy', 'score': 0.99}], [{'label': 'sadness', 'score': 0.95}]]
+        # La aplicación Flask principal espera una lista de estos diccionarios (o la etiqueta principal).
+        # Si tu aplicación cliente espera directamente una lista de etiquetas, necesitarías procesar esto.
+        # results = classifier(texts, padding=True, truncation=True) # Padding y truncation son buenas prácticas
         
-        # Mapear los resultados de vuelta a la longitud original de 'texts' si es necesario
-        # o decidir cómo manejar los textos inválidos (aquí simplemente se ignoran para la predicción).
-        # Por simplicidad, devolvemos emociones solo para los textos válidos.
-        # Si el cliente espera una emoción (o null/error) por CADA texto original,
-        # se necesitaría una lógica de mapeo más compleja.
+        # Procesar textos en lotes si son muchos para evitar problemas de memoria (opcional, depende del uso)
+        # batch_size = 16 
+        # results = []
+        # for i in range(0, len(texts), batch_size):
+        #    batch_texts = texts[i:i + batch_size]
+        #    results.extend(classifier(batch_texts, padding=True, truncation=True))
+        
+        # Procesamiento simple
+        results = classifier(texts, padding=True, truncation=True)
 
-        top_emotions = [
-            max(result_set, key=lambda x: x['score'])['label']
-            for result_set in results # results aquí ya corresponde a valid_texts
-        ]
-        return jsonify({"emotions": top_emotions})
+        # La aplicación Flask principal parece esperar una lista de diccionarios [{label: '...', score: ...}]
+        # o al menos poder acceder a result[0]['label'].
+        # Si `classifier` ya devuelve [{...}], [{...}], ... entonces está bien.
+        # Si devuelve [[{...}]], [[{...}]], ... (que es común con top_k=1), necesitamos extraer el primer elemento.
+        
+        # Aseguramos que la salida sea una lista de diccionarios (o el objeto que el pipeline retorna por elemento)
+        # Si results = [[{'label': 'joy', 'score': 0.99}], [{'label': 'sad', 'score': 0.8}]]
+        # y quieres que sea [{'label': 'joy', 'score': 0.99}, {'label': 'sad', 'score': 0.8}]
+        # Esto depende de cómo el pipeline específico con top_k=1 formatea su salida.
+        # Para `text-classification` con `top_k=1`, normalmente devuelve una lista de listas, 
+        # cada sublista conteniendo un único diccionario.
+        # Ejemplo: [[{'label': 'joy', 'score': 0.998}]].
+        # La aplicación principal usaba: emocion_data[0]['label']
+        # Esto implica que cada elemento de la lista 'emotions' es una lista que contiene un diccionario.
+        
+        # Por lo tanto, 'results' ya debería tener el formato:
+        # [[{'label': 'joy', 'score': 0.99887...}], [{'label': 'anger', 'score': 0.99820...}]]
+        # que es lo que la aplicación principal espera en `comments_dict.values()`
+        # para luego hacer `emocion_data[0]['label']`.
+
+        logger.info(f"Clasificación completada para el modelo: {model_name}.")
+        return jsonify({"emotions": results})
+
     except Exception as e:
-        # Esto podría capturar errores durante la inferencia del pipeline
-        print(f"Error durante la clasificación con el pipeline: {e}")
-        return jsonify({"error": "Ocurrió un error interno durante la clasificación de emociones."}), 500
-
+        logger.error(f"Error durante la clasificación con el modelo '{model_name}': {e}")
+        return jsonify({"error": f"Error durante la clasificación: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5001))
-    # `debug=True` es útil para desarrollo, pero considera desactivarlo en producción.
-    # `use_reloader=False` puede ser útil si tienes problemas con el modelo cargándose dos veces
-    # debido al recargador de Flask en modo debug, especialmente con recursos GPU.
-    # Sin embargo, perderías la recarga automática al cambiar código.
-    api.run(host='0.0.0.0', port=port, debug=True) #, use_reloader=False si hay problemas con GPU y debug
+    port = int(os.environ.get("PORT", 5001))
+    # Para producción, considera usar un servidor WSGI como Gunicorn o uWSGI
+    # Ejemplo: gunicorn -w 4 -b 0.0.0.0:5001 model_api:app
+    logger.info(f"Servicio de modelos iniciando en el puerto {port}")
+    app.run(debug=True, host='0.0.0.0', port=port) # debug=False para producción
