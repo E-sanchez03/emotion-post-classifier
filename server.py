@@ -1,4 +1,5 @@
-from flask import Flask, request, render_template, render_template_string
+# Importar librerías
+from flask import Flask, request, render_template
 import praw
 import prawcore
 from dotenv import load_dotenv
@@ -6,10 +7,16 @@ import os
 import polars as pl
 import requests
 import json
+import logging
+
+# Configurar logging básico
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Cargar variables de entorno
 load_dotenv("credencialesPraw.env")
 
+# Inicializar la aplicación de Flask
 app = Flask(__name__)
 
 # Conexión a Reddit
@@ -21,69 +28,54 @@ try:
         read_only=True
     )
     reddit.user.me() 
-    print("Conexión a Reddit exitosa.")
+    logger.info("Conexión a Reddit exitosa.")
 except Exception as e:
-    print(f"Error al inicializar PRAW o conectar a Reddit: {e}")
+    logger.info(f"Error al inicializar PRAW o conectar a Reddit: {e}")
     reddit = None
 
+# URL a la que acceder para realizar la solicitud POST 
 MODEL_SERVICE_URL = os.getenv("MODEL_SERVICE_URL", "http://localhost:5001/classify")
 
-# Lista de modelos válidos (opcional, pero bueno para validación si es necesario aquí)
-# Si el servicio de modelos ya valida, esto podría no ser estrictamente necesario aquí.
-# Sin embargo, es bueno tenerlo para una validación temprana.
-VALID_MODELS = [
-    "j-hartmann/emotion-english-distilroberta-base",
-    "michellejieli/emotion_text_classifier",
-    "Panda0116/emotion-classification-model",
-    "hamzawaheed/emotion-classification-model",
-    "uboza10300/emotion-classification-model",
-    "Zoopa/emotion-classification-model",
-    "bhadresh-savani/distilbert-base-uncased-emotion",
-    "SamLowe/roberta-base-go_emotions",
-    "joeddav/distilbert-base-uncased-go-emotions-student"
-]
-
-# PASO 3: Modificar annotate_comments para aceptar selected_model y pasarlo al servicio
+# Función para obtener un diccionario con cada comentario y su emoción más probable
 def annotate_comments(comment_list, selected_model):
     if not comment_list:
         return {}, "No hay comentarios para anotar."
 
+    # Obtención del cuerpo de los comentarios, sin metadatos
     texts = [comment.body for comment in comment_list if hasattr(comment, "body") and comment.body.strip()]
     
     if not texts:
         return {}, "No se encontraron cuerpos de comentario válidos para procesar."
 
-    valid_comments_for_annotation = [comment for comment in comment_list if hasattr(comment, "body") and comment.body.strip()]
-
-    # Payload para el servicio de modelos, incluyendo el modelo seleccionado
+    # Payload para el servicio de modelos, incluyendo el modelo seleccionado y los comentarios
     payload = {
         "texts": texts,
-        "model_name": selected_model # <- AÑADIDO model_name al payload
+        "model_name": selected_model
     }
 
     try:
-        # response = requests.post(MODEL_SERVICE_URL, json={"texts": texts}) # <- LÍNEA ANTIGUA
-        response = requests.post(MODEL_SERVICE_URL, json=payload) # <- LÍNEA NUEVA con payload
+        # Enviamos la solicutd POST con el payload
+        response = requests.post(MODEL_SERVICE_URL, json=payload)
         response.raise_for_status()
         
         try:
+            # Obtener los resultados
             response_data = response.json()
         except json.JSONDecodeError:
             return {}, f"Error: El servicio del modelo no devolvió un JSON válido. Respuesta: {response.text[:200]}"
-
+        # Quedarnos con el objeto emotions del JSON
         results = response_data.get("emotions")
+        # Errores posibles si no hay resultados
         if results is None:
-            # Podrías también querer verificar si hay un error específico del modelo en response_data
             error_from_service = response_data.get("error")
             if error_from_service:
                  return {}, f"Error del servicio de modelo: {error_from_service}. Respuesta: {response_data}"
             return {}, f"Error: La respuesta del servicio del modelo no contiene la clave 'emotions'. Respuesta: {response_data}"
         
-        if len(results) != len(valid_comments_for_annotation):
-            return {}, f"Error: Discrepancia en el número de resultados ({len(results)}) y comentarios enviados ({len(valid_comments_for_annotation)})."
+        # Devolver un dicciónario con cada id de comentario y su resultado
+        return {comment.id: result for comment, result in zip(comment_list, results) if hasattr(comment, "id")}, None
 
-        return {comment.id: result for comment, result in zip(valid_comments_for_annotation, results) if hasattr(comment, "id")}, None
-
+    # Obtención de errores provenientes de la solicitud POST
     except requests.exceptions.Timeout:
         return {}, f"Error: Timeout al contactar el servicio del modelo en {MODEL_SERVICE_URL}."
     except requests.exceptions.ConnectionError:
@@ -99,18 +91,21 @@ def annotate_comments(comment_list, selected_model):
     except requests.exceptions.RequestException as e:
         return {}, f"Error al contactar el servicio del modelo: {e}"
 
-# PASO 2: Modificar get_results para aceptar selected_model
-def get_results(url, selected_model): # <- AÑADIDO selected_model como parámetro
-    if not reddit:
-        return [], [], "Error: La conexión con Reddit no está disponible."
 
+# Función
+def get_results(url, selected_model): 
+    
     try:
+        # Obtener el post de Reddit solicitado
         submission = reddit.submission(url=url)
         if submission is None or not hasattr(submission, 'title'):
             return [], [], f"No se pudo encontrar una publicación de Reddit válida en la URL: {url}"
         
-        submission.comments.replace_more(limit=10) # Considera hacer este límite configurable o mayor
-        comments = submission.comments.list()
+        # Reemplzar los comentarios de tipo 'More Comments'. COnfigurado a 10 por tema de eficiencia ( No obtiene todos los comentarios posibles )
+        submission.comments.replace_more(limit=10) 
+        comments = submission.comments.list()  # Obtener la lista de comentarios
+        
+    # Excepciones que pueden ocurrir al usar Reddit
     except prawcore.exceptions.Redirect:
         return [], [], f"URL de Reddit inválida o redirigida: {url}"
     except prawcore.exceptions.NotFound:
@@ -123,7 +118,7 @@ def get_results(url, selected_model): # <- AÑADIDO selected_model como parámet
     if not comments:
         return [], [], "No se encontraron comentarios en la publicación."
 
-    # Pasar selected_model a annotate_comments
+    # Obtener el dicionario con las emociones
     comments_dict, error_msg_annotation = annotate_comments(comments, selected_model)
 
     if error_msg_annotation:
@@ -131,36 +126,22 @@ def get_results(url, selected_model): # <- AÑADIDO selected_model como parámet
 
     if not comments_dict:
         return [], [], "No se pudieron anotar emociones para los comentarios encontrados."
-    
-    # Asegurarse de que comments_dict.values() contenga diccionarios (o la estructura esperada)
-    # Si la emoción es una sola etiqueta (string), está bien. Si es un dict (ej. {'label': 'joy', 'score': 0.9}),
-    # necesitarás extraer la etiqueta principal. Asumiendo que ya es la etiqueta string.
-    # Ejemplo de cómo manejar si 'Emoción' fuera una lista de dicts:
-    # emotion_labels = [e[0]['label'] if isinstance(e, list) and e and isinstance(e[0], dict) else str(e) for e in comments_dict.values()]
-    # df = pl.DataFrame({
-    #     "ID_Comentario": list(comments_dict.keys()),
-    #     "Emoción": emotion_labels 
-    # })
 
-    # Asumiendo que comments_dict.values() directamente da las etiquetas de emoción
+    # Obtener la emoción de cada comentario
     emociones_procesadas = []
     for emocion_data in comments_dict.values():
-        if isinstance(emocion_data, list) and emocion_data: # Si el modelo devuelve una lista de [{label: '', score: ''}]
-            emociones_procesadas.append(emocion_data[0]['label'])
-        elif isinstance(emocion_data, dict): # Si devuelve un solo dict {label: '', score: ''}
-             emociones_procesadas.append(emocion_data.get('label', 'desconocida'))
-        else: # Si devuelve directamente el string de la emoción (caso ideal para el código actual)
-            emociones_procesadas.append(str(emocion_data))
+        emociones_procesadas.append(emocion_data[0]['label'])
 
-
+    # Formar un DataFrame de Polars para usar funciones de agregación
     df = pl.DataFrame({
         "ID_Comentario": list(comments_dict.keys()),
-        "Emoción": emociones_procesadas # Usar las emociones procesadas
+        "Emoción": emociones_procesadas 
     })
     
     if df.is_empty():
         return [], [], "No hay datos de emociones para mostrar después del procesamiento."
 
+    # Obtenemos un DF agrupado por cada emoción y su conteo
     emociones_agg = df.group_by("Emoción").agg(pl.count().alias("count")).sort("count", descending=True)
     
     if emociones_agg.is_empty():
@@ -169,24 +150,15 @@ def get_results(url, selected_model): # <- AÑADIDO selected_model como parámet
     emociones_dict = emociones_agg.to_dict(as_series=False)
     return emociones_dict.get("Emoción", []), emociones_dict.get("count", []), None
 
+# Página principal dinámica
 @app.route("/", methods=["GET", "POST"])
 def home():
+    # Si se ha solicitado un análisis se pedirá un POST
     if request.method == "POST":
-        url = request.form.get("url")
-        # PASO 1: Recuperar model_choice del formulario
-        selected_model = request.form.get("model_choice")
+        url = request.form.get("url")  # URL pasada por el usuario
+        selected_model = request.form.get("model_choice") # Modelo del formulario
 
-        if not url:
-            return render_template("resultado.html", error="Por favor, introduce una URL.")
-        
-        if not selected_model:
-            return render_template("resultado.html", error="Por favor, selecciona un modelo de análisis.")
-
-        # (Opcional) Validar si el modelo seleccionado es uno de los conocidos
-        if selected_model not in VALID_MODELS:
-             return render_template("resultado.html", error=f"El modelo '{selected_model}' no es válido.")
-
-        # Pasar selected_model a get_results
+        # Obtenemos las emociones con sus valores de agregación
         emociones, counts, error_msg = get_results(url, selected_model)
 
         if error_msg:
@@ -195,16 +167,18 @@ def home():
         if not emociones or not counts:
             return render_template("resultado.html", error="No se encontraron emociones o comentarios válidos para mostrar.", submitted_url=url, submitted_model=selected_model)
 
+        # Formamos un gráfico usando Chart.js
         chart_data = {
             "labels": emociones,
             "datasets": [{
                 "label": "Cantidad de Comentarios por Emoción",
                 "data": counts,
+                # Colores generados por GPT que generan una visualización agradable a la vista
                 "backgroundColor": [
                     'rgba(255, 99, 132, 0.2)', 'rgba(54, 162, 235, 0.2)',
                     'rgba(255, 206, 86, 0.2)', 'rgba(75, 192, 192, 0.2)',
                     'rgba(153, 102, 255, 0.2)', 'rgba(255, 159, 64, 0.2)',
-                    'rgba(199, 199, 199, 0.2)', 'rgba(100, 100, 255, 0.2)', # Añadí más colores
+                    'rgba(199, 199, 199, 0.2)', 'rgba(100, 100, 255, 0.2)', 
                     'rgba(255, 100, 100, 0.2)', 'rgba(100, 255, 100, 0.2)'
                 ],
                 "borderColor": [
@@ -218,16 +192,14 @@ def home():
             }]
         }
         chart_data_json = json.dumps(chart_data)
-
+        # Pasamos los datos al html donde se encuentra el Script de JS
         return render_template("resultado.html", chart_data_json=chart_data_json, submitted_url=url, submitted_model=selected_model)
+    
+    # Mostramos la página de incio si el método es de tipo GET
     else:     
-        # Asumiendo que tu template.html es el formulario inicial
-        # Puedes pasar la lista de modelos al template si quieres generarlos dinámicamente allí
-        # en lugar de tenerlos hardcodeados en el HTML.
-        # Por ahora, asumo que template.html tiene el selector ya definido.
-        return render_template("template.html") # Asegúrate de que este es el nombre correcto de tu formulario
+        return render_template("template.html") 
 
 if __name__ == "__main__":
     if not reddit:
-        print("ADVERTENCIA: El servidor se está ejecutando pero no se pudo conectar a Reddit al inicio.")
-    app.run(debug=True, host='0.0.0.0', port=8050) # Puerto 8050 como en tu original
+        logger.info("ADVERTENCIA: El servidor se está ejecutando pero no se pudo conectar a Reddit al inicio.")
+    app.run(debug=True, host='0.0.0.0', port=8050) 
